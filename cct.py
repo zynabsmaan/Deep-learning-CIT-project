@@ -1,106 +1,15 @@
-import os
+from ast import arg
 import glob
-import re 
+import datetime
 import torchvision as tv
-from torchvision.io import image
-import pandas as pd
-from torchvision.io import read_image
-from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-import torchvision.transforms.functional as fn
 import torchvision.transforms as transforms
-import matplotlib.pyplot as plt
-import numpy as np
-
-
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import torch
 import torch.nn as nn
-import torch.nn.init as init
 import torch.nn.functional as F
-from torchsummary import summary
-
-import os 
-import gc
-gc.collect()
-torch.cuda.empty_cache()
-torch.cuda.synchronize()
-
-IMG_SIZE = 64
-class ReadData(object):
-    def __init__(self, parent_folder_path):
-
-       self.build_csv_files(parent_folder_path)
-  
-
-    def build_csv_files(self, parent_folder_path):
-        sub_dirs = [name for name in os.listdir(parent_folder_path)]
-        for sub_dir in sub_dirs:
-            
-            all_image_paths = []
-            all_labels = []
-
-            data_paths = [data_path for data_path in os.walk(os.path.join(parent_folder_path, sub_dir))]
-
-            for data_path in data_paths:
-                # import pdb; pdb.set_trace()
-                if data_path[-1]:
-                    folder_path = data_path[0]
-                    image_paths = data_path[-1]
-
-                    full_image_paths = [os.path.join(folder_path, image_path) for image_path in image_paths]
-                    labels = self.get_annotation(image_paths)
-
-                    all_image_paths.extend(full_image_paths)
-                    all_labels.extend(labels)
-            self.save_to_csv(sub_dir, all_image_paths, all_labels)
-
-
-    def get_annotation(self, image_paths):
-        labels = []
-        for image_path in image_paths:
-            label = re.findall(r'bacteria|normal|virus|im', image_path.lower())[0]
-            if label == 'im':
-                labels.append('normal')
-            else:
-                labels.append(label)
-        return labels
-
-    def save_to_csv(self, file_name, image_paths, labels):
-        data = {'image_path': image_paths, 'labels': labels}
-        df = pd.DataFrame(data)
-        df['labels'] = df['labels'].map({'bacteria':1,'virus':1, 'normal':0})
-        df.to_csv(f'{file_name}.csv', index=False)
-    
-
-ReadData('data')
-
-class CustomImageDataset(Dataset):
-    def __init__(self, annotations_file, img_dir, special_transform = None, transform=None, target_transform=None):
-        self.img_labels = pd.read_csv(annotations_file)
-        self.img_dir = img_dir
-        self.transform = transform
-        self.target_transform = target_transform
-        self.special_transform = special_transform
-
-    def __len__(self):
-        return len(self.img_labels)
-
-    def __getitem__(self, idx):       
-        img_path = os.path.join(self.img_dir, self.img_labels.iloc[idx, 0])
-        image = read_image(img_path)
-        image = fn.resize(image, size=[IMG_SIZE, IMG_SIZE])
-        label = self.img_labels.iloc[idx, 1]
-        if image.shape[0] > 1:
-            image = self.special_transform(image)
-        if self.transform:
-            image = self.transform(image)
-        if self.target_transform:
-            label = self.target_transform(label)
-        return image, label
-
-
+from custom_dataset import Chest3Dataset, CovidDataset
+from settings import IMG_SIZE, N_INPUT_CHANNELS, NUM_CLASSES, N_CONV_LAYERS_LIST, KERNEL_SIZE_LIST
+from model_metadata import create_model_dir, save_common_info, plot_progress, get_model_summary, save_custom_info
 # Modules
 class Attention(nn.Module):
     def __init__(self, dim, num_heads=8, attention_dropout=0.1, projection_dropout=0.1):
@@ -338,6 +247,37 @@ class TransformerClassifier(nn.Module):
         return pe.unsqueeze(0)
 
 
+class MyResNetArgs:
+   """
+    Passing the hyperparameters to the model
+   """
+   def __init__(self,epochs=100, start_epoch=0, batch_size=128, lr=0.1, momentum=0.9, weight_decay=1e-4, n_conv_layers=1, kernel_size=3,
+   stride = 2, padding = 1, pooling_kernel_size=3, pooling_stride=2, pooling_padding=1, num_layers=2, num_heads=2, mlp_radio=1.):
+        
+        self.weight_decay = weight_decay
+        self.momentum = momentum 
+        self.lr = lr 
+        self.batch_size = batch_size 
+        self.start_epoch = start_epoch
+        self.epochs = epochs
+        self.arch = 'conv+transformer'
+        self.embedding_dim = 128
+        self.n_conv_layers = n_conv_layers
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+        self.pooling_kernel_size=pooling_kernel_size
+        self.pooling_stride=pooling_stride
+        self.pooling_padding=pooling_padding
+
+        self.num_layers=num_layers
+        self.num_heads=num_heads
+        self.mlp_radio=mlp_radio
+
+
+        
+
 class AverageMeter(object):
     """Computes and stores the average and current value"""
     def __init__(self):
@@ -475,7 +415,7 @@ class CCT(nn.Module):
         x = self.tokenizer(x)
         return self.classifier(x)
 
-def main(model):
+def main(model_path, model):
     best_acc = 0
 
     model.cuda()
@@ -483,13 +423,19 @@ def main(model):
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    optimizer = torch.optim.Adam(model.parameters(), .001, weight_decay=1e-4)
-    # print('Training {} model'.format(args.arch))
+    optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum,
+                                weight_decay=args.weight_decay)
+
+    lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                        milestones=[100, 150], last_epoch=args.start_epoch - 1)
+
     test_accs, test_losses = [], []
     train_accs, train_losses = [], []
-    for epoch in range(0,100):
+    for epoch in range(args.start_epoch, args.epochs):
 
         train_acc, train_loss = train(train_loader, model, criterion, optimizer, epoch)
+        lr_scheduler.step()
+
         train_accs.append(train_acc)
         train_losses.append(train_loss)
 
@@ -497,6 +443,10 @@ def main(model):
         acc, loss = testing(test_loader, model, criterion)
         test_accs.append(acc)
         test_losses.append(loss)
+        if acc > best_acc:
+            best_acc = acc
+            # save model 
+            torch.save(model.state_dict(), f'{model_path}/model.pth')
 
     return {"best_acc": max(test_accs), "test_accs":test_accs, "test_losses": test_losses, "train_acss": train_accs, "train_losses": train_losses}
 
@@ -507,7 +457,7 @@ print(device)
 model = CCT(
         img_size=IMG_SIZE,
         embedding_dim=128,
-        n_input_channels=1,
+        n_input_channels=N_INPUT_CHANNELS,
         n_conv_layers=1,
         kernel_size=3,
         stride=2,
@@ -518,22 +468,54 @@ model = CCT(
         num_layers=4,
         num_heads=4,
         mlp_radio=1.,
-        num_classes=2,
+        num_classes=NUM_CLASSES,
         positional_embedding='none', # ['sine', 'learnable', 'none']
         )
-print(summary(model.to(device), (1,IMG_SIZE ,IMG_SIZE)))
+
+train_loader = DataLoader(Chest3Dataset('data/chest_xray_3/train.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)]), transform=transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip(), transforms.RandomRotation(.05)])), batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
+test_loader = DataLoader(Chest3Dataset('data/chest_xray_3/test.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, num_workers=2, pin_memory=True)
 
 
-train_loader = DataLoader(CustomImageDataset('train.csv', '.', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)]), transform=transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip(), transforms.RandomRotation(.05)])), batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
 
-test_loader = DataLoader(CustomImageDataset('test.csv', '.', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, num_workers=2, pin_memory=True)
-
-import datetime
+# if __name__ == '__main__':
+#     print(datetime.datetime.now())
+#     model_info = main(model)
+#     print(model_info)
+#     print(datetime.datetime.now())
 
 
 if __name__ == '__main__':
-    print(datetime.datetime.now())
-    model_info = main(model)
-    print(model_info)
+    models_info = {}
+    for n_conv_layer in N_CONV_LAYERS_LIST:
+        for kernel_size in KERNEL_SIZE_LIST:
+            global args
+            args=MyResNetArgs(kernel_size=kernel_size, n_conv_layers=n_conv_layer)
+            model = CCT(
+                img_size=IMG_SIZE,
+                embedding_dim=args.embedding_dim,
+                n_input_channels=N_INPUT_CHANNELS,
+                n_conv_layers=args.n_conv_layers,
+                kernel_size=args.kernel_size,
+                stride=args.stride,
+                padding=args.padding,
+                pooling_kernel_size=args.pooling_kernel_size,
+                pooling_stride=args.pooling_stride,
+                pooling_padding=args.pooling_padding,
+                num_layers=args.num_layers,
+                num_heads=args.num_heads,
+                mlp_radio=args.mlp_radio,
+                num_classes=NUM_CLASSES,
+                positional_embedding='none', # ['sine', 'learnable', 'none']
+                )
 
-    print(datetime.datetime.now())
+            model_path = create_model_dir('cct_results')
+            get_model_summary(model_path, model)
+            start = datetime.datetime.now() 
+            model_info = main(model_path, model)
+            end = datetime.datetime.now()
+            save_common_info(model_path, args, model_info, start, end)
+            save_custom_info(model_path, args)
+            plot_progress(model_path, "Testing Accuracy", "cct", model_info["test_accs"])
+            plot_progress(model_path, "Training Accuracy", "cct", model_info["train_acss"])
+            plot_progress(model_path, "Testing Loss", "cct", model_info["test_losses"])
+            plot_progress(model_path, "Training Loss", "cct", model_info["train_losses"])

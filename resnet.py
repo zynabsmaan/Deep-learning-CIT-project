@@ -1,23 +1,15 @@
+import datetime
 import torchvision as tv
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 import torch
 import torch.nn as nn
-import torch.nn.init as init
 import torch.nn.functional as F
-import torchvision.transforms.functional as fn
-from torchsummary import summary
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-import seaborn as sns
-import datetime
-import os 
-import re
-import sys
+import torch.nn.init as init
 from custom_dataset import Chest3Dataset, CovidDataset
 from settings import IMG_SIZE, ALL_ARCHITECTURES
+from model_metadata import create_model_dir, save_common_info, plot_progress, get_model_summary
 
-DATASET = "chest_xray_3"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 
@@ -118,15 +110,6 @@ def resnet44():
 
 def resnet56():
     return ResNet(BasicBlock, [9, 9, 9])
-
-
-def get_model_summary(model_path, model):
-    original_stdout = sys.stdout
-    with open(f'{model_path}/model_summary.out', 'a+') as f:
-        f.write(f"Total layers {len(list(filter(lambda p: p.requires_grad and len(p.data.size())>1, model.parameters())))}\n")
-        sys.stdout = f
-        summary(model.to(device), (1,IMG_SIZE, IMG_SIZE))
-        sys.stdout = original_stdout
 
 
 class MyResNetArgs:
@@ -243,23 +226,13 @@ def accuracy(output, target, topk=1):
     return res
 
 
+
 train_loader = DataLoader(Chest3Dataset('data/chest_xray_3/train.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)]), transform=transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip(), transforms.RandomRotation(.05)])), batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
 test_loader = DataLoader(Chest3Dataset('data/chest_xray_3/test.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, num_workers=2, pin_memory=True)
 
-
+# TODO: Don't forget to change this variable {DATASET} to the dataset name you are training on 
 # train_loader = DataLoader(CovidDataset('../data/covid_data/train.csv', '../data/covid_data/train', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=True, pin_memory=True)
 # test_loader = DataLoader(CovidDataset('../data/covid_data/test.csv', '../data/covid_data/test', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, pin_memory=True)
-
-
-
-def plot_progress(model_path, mode, model_name, data):
-    sns.set_theme(style="darkgrid")
-    sns.lineplot(x = list(range(1, len(data)+1, 1)), y = data)
-    plt.title(f"{mode} progress for {model_name} model")
-    plt.xlabel("epochs", fontsize=14)
-    plt.ylabel(mode, fontsize=14)
-    plt.savefig(f'{model_path}/{mode.replace(" ", "")}.png')
-    plt.close()
 
 
 def main(model_path, model_name):
@@ -273,7 +246,7 @@ def main(model_path, model_name):
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
 
-    optimizer = torch.optim.Adam(model.parameters(), args.lr,
+    optimizer = torch.optim.SGD(model.parameters(), args.lr, momentum=args.momentum,
                                 weight_decay=args.weight_decay)
 
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
@@ -302,37 +275,16 @@ def main(model_path, model_name):
     return {"best_acc": max(test_accs), "test_accs":test_accs, "test_losses": test_losses, "train_acss": train_accs, "train_losses": train_losses}
 
 
-
-def create_model_dir():
-    dir_list = os.listdir("results_resnet")
-    if not dir_list:
-        model_path = "results_resnet/model_1"
-        os.mkdir(model_path)
-        return model_path
-    else:
-        next_number = max([int(re.findall(r'[0-9]+', dir)[0]) for dir in dir_list]) + 1
-        model_path = f"results_resnet/model_{next_number}"
-        os.mkdir(model_path)
-        return model_path
-
-def save_info(model_path, args, model_info, start, end):
-    with open(f'{model_path}/save_info.txt', 'w') as f:
-        s = f"""The start time is {start} and end time {end}\nArchitecture: {args.arch}\nlearning rate: {args.lr}\nepoch: {args.epochs}\nweight_decay: {args.weight_decay}\nMomentum: {args.momentum}\n
-        batch_size: {args.batch_size}\nTesting Accuracy: {model_info["test_accs"]}\nTraining Accuracy": {model_info["train_acss"]}\nTesting Loss":
-         {model_info["test_losses"]}\nTraining Loss": {model_info["train_losses"]}\nThe higher accuracy: {model_info["best_acc"]}"""
-        f.write(s)
-
-
 if __name__ == '__main__':
    models_info = {}
    for architecture in ALL_ARCHITECTURES:
-       model_path = create_model_dir()
+       model_path = create_model_dir('results_resnet')
        get_model_summary(model_path, globals()[architecture]())
        start = datetime.datetime.now() 
        model_info = main(model_path, architecture)
        end = datetime.datetime.now()
        models_info[architecture] = model_info
-       save_info(model_path, args, model_info, start, end)
+       save_common_info(model_path, args, model_info, start, end)
        plot_progress(model_path, "Testing Accuracy", architecture, model_info["test_accs"])
        plot_progress(model_path, "Training Accuracy", architecture, model_info["train_acss"])
        plot_progress(model_path, "Testing Loss", architecture, model_info["test_losses"])
