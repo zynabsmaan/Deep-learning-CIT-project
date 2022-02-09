@@ -116,7 +116,7 @@ class MyResNetArgs:
    """
     Passing the hyperparameters to the model
    """
-   def __init__(self, arch='resnet20' ,epochs=100, start_epoch=0, batch_size=128, lr=0.1, momentum=0.9, weight_decay=1e-4):
+   def __init__(self, arch='resnet20' ,epochs=5, start_epoch=0, batch_size=128, lr=0.1, momentum=0.9, weight_decay=1e-4):
         
         self.weight_decay = weight_decay
         self.momentum = momentum 
@@ -227,12 +227,12 @@ def accuracy(output, target, topk=1):
 
 
 
-train_loader = DataLoader(Chest3Dataset('data/chest_xray_3/train.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)]), transform=transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip(), transforms.RandomRotation(.05)])), batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
-test_loader = DataLoader(Chest3Dataset('data/chest_xray_3/test.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, num_workers=2, pin_memory=True)
+# train_loader = DataLoader(Chest3Dataset('data/chest_xray_3/train.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)]), transform=transforms.Compose([transforms.RandomHorizontalFlip(), transforms.RandomVerticalFlip(), transforms.RandomRotation(.05)])), batch_size=128, shuffle=True, num_workers=2, pin_memory=True)
+# test_loader = DataLoader(Chest3Dataset('data/chest_xray_3/test.csv', 'data/chest_xray_3', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, num_workers=2, pin_memory=True)
 
 # TODO: Don't forget to change this variable {DATASET} to the dataset name you are training on 
-# train_loader = DataLoader(CovidDataset('../data/covid_data/train.csv', '../data/covid_data/train', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=True, pin_memory=True)
-# test_loader = DataLoader(CovidDataset('../data/covid_data/test.csv', '../data/covid_data/test', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=128, shuffle=False, pin_memory=True)
+train_loader = DataLoader(CovidDataset('data/covid_data/train.csv', 'data/covid_data/train', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=256, shuffle=True, pin_memory=True)
+test_loader = DataLoader(CovidDataset('data/covid_data/test.csv', 'data/covid_data/test', special_transform=transforms.Compose([tv.transforms.Grayscale(num_output_channels=1)])), batch_size=256, shuffle=False, pin_memory=True)
 
 
 def main(model_path, model_name):
@@ -278,7 +278,7 @@ def main(model_path, model_name):
 if __name__ == '__main__':
    models_info = {}
    for architecture in ALL_ARCHITECTURES:
-       model_path = create_model_dir('results_resnet')
+       model_path = create_model_dir('results')
        get_model_summary(model_path, globals()[architecture]())
        start = datetime.datetime.now() 
        model_info = main(model_path, architecture)
@@ -289,6 +289,3 @@ if __name__ == '__main__':
        plot_progress(model_path, "Training Accuracy", architecture, model_info["train_acss"])
        plot_progress(model_path, "Testing Loss", architecture, model_info["test_losses"])
        plot_progress(model_path, "Training Loss", architecture, model_info["train_losses"])
-
-
-

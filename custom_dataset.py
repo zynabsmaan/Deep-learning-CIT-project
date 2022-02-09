@@ -105,3 +105,4 @@ class ReadData(object):
         df = pd.DataFrame(data)
         df['labels'] = df['labels'].map({'bacteria':1,'virus':1, 'normal':0})
         df.to_csv(f'{file_name}.csv', index=False)
+

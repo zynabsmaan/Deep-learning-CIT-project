@@ -1,11 +1,9 @@
 import os, re, sys
-
 import torch
 from torchsummary import summary
 import seaborn as sns
 import matplotlib.pyplot as plt
-
-from settings import IMG_SIZE, DATASET
+from settings import IMG_SIZE
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -32,7 +30,7 @@ def create_model_dir(folder_name):
 
 def save_common_info(model_path, args, model_info, start, end):
     with open(f'{model_path}/save_info.txt', 'a+') as f:
-        s = f"""The dataset is: {DATASET}\nThe start time is {start} and end time {end}\nArchitecture: {args.arch}\nlearning rate: {args.lr}\nepoch: {args.epochs}\nweight_decay: {args.weight_decay}\nMomentum: {args.momentum}\n
+        s = f"""The start time is {start} and end time {end}\nArchitecture: {args.arch}\nlearning rate: {args.lr}\nepoch: {args.epochs}\nweight_decay: {args.weight_decay}\nMomentum: {args.momentum}\n
         batch_size: {args.batch_size}\nTesting Accuracy: {model_info["test_accs"]}\nTraining Accuracy": {model_info["train_acss"]}\nTesting Loss":
          {model_info["test_losses"]}\nTraining Loss": {model_info["train_losses"]}\nThe higher accuracy: {model_info["best_acc"]}"""
         f.write(s)
@@ -48,8 +46,7 @@ def save_custom_info(model_path, args):
                 pooling_stride: {args.pooling_stride}\n
                 pooling_padding: {args.pooling_padding}\n
                 num_layers: {args.num_layers}\n
-                num_heads: {args.num_heads}\n
-                mlp_radio: {args.mlp_radio}
+                num_heads: {args.num_heads}
         """
         f.write(s)
 
@@ -60,3 +57,14 @@ def get_model_summary(model_path, model):
         sys.stdout = f
         summary(model.to(device), (1,IMG_SIZE, IMG_SIZE))
         sys.stdout = original_stdout
+
+
+def get_higher_acc(results_folder):
+    dir_list = os.listdir(results_folder)
+    for dir_name in dir_list:
+        file_path = os.path.join(results_folder, dir_name, 'save_info.txt')
+        if os.path.isfile(file_path):
+            with open(file_path, 'r') as f:
+                info = f.read()
+                higher_acc = re.findall('The higher accuracy: (.*)', info)
+                print(f'{file_path} == {higher_acc[0]}')
